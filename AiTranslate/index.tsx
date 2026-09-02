@@ -140,35 +140,50 @@ function tr(key: keyof typeof uiStrings["zh"]): string {
     return uiStrings[uiLang()][key];
 }
 
+/** Sentinel value stored in targetLang: follow the Discord UI language. */
+const AUTO_TARGET = "auto";
+
 /**
- * The language to translate INTO, following the Discord UI language.
- * Users can override with the targetLang dropdown (turn followLocale off).
+ * The language to translate INTO.
+ * - "auto" (the dropdown default) resolves to the Discord UI language.
+ * - any other value is the fixed language picked from the dropdown.
  */
 function resolveTargetLang(): string {
-    if (settings.store.followLocale) {
+    const raw = String(settings.store.targetLang ?? "").trim();
+
+    // Legacy: older versions stored a boolean followLocale. Honour it as "auto".
+    const legacyFollow = (settings.store as any).followLocale;
+    const isAuto = !raw || raw === AUTO_TARGET || legacyFollow === true;
+
+    if (isAuto) {
         const locale = getDiscordLocale();
         // Exact match first, then base-language match (e.g. "en" matches "en-US").
         return DISCORD_LOCALE_TO_LANG[locale]
             ?? DISCORD_LOCALE_TO_LANG[locale.split("-")[0]]
             ?? "简体中文";
     }
-    // targetLang is a SELECT now; tolerate any leftover free-text value from
-    // older versions by normalising it into one of the dropdown options.
-    // If it does not match, keep the raw value — the model understands most
-    // language names ("Français", "法语", "German"...).
-    const raw = String(settings.store.targetLang ?? "").trim();
-    if (!raw) return "简体中文";
+
+    // Tolerate any leftover free-text value from older versions by normalising
+    // it into one of the dropdown options. If it does not match, keep the raw
+    // value — the model understands most language names ("Français", "法语"...).
     return normalizeTargetLang(raw) ?? raw;
 }
 
 // ---------------------------------------------------------------------------
-// Target-language dropdown options (shown when "followLocale" is off).
+// Target-language dropdown options. The first option ("auto") follows the
+// Discord UI language and is the default; everything else is a fixed language.
 // Values are natural language names that we hand straight to the AI model,
 // matching the DISCORD_LOCALE_TO_LANG values above.
 // ---------------------------------------------------------------------------
 
-const TARGET_LANG_OPTIONS: { label: string; value: string; default?: boolean }[] = [
-    { label: "简体中文", value: "简体中文", default: true },
+const TARGET_LANG_OPTIONS: { get label(): string; value: string; default?: boolean }[] = [
+    // getter so the label follows the UI language at render time
+    {
+        get label() { return "🌐 " + tr2("跟随 Discord 界面语言（默认）", "Follow Discord UI language (default)"); },
+        value: AUTO_TARGET,
+        default: true,
+    },
+    { label: "简体中文", value: "简体中文" },
     { label: "繁體中文", value: "繁體中文" },
     { label: "English", value: "English" },
     { label: "日本語", value: "日本語" },
@@ -227,94 +242,97 @@ function normalizeTargetLang(v: string): string | undefined {
 // ---------------------------------------------------------------------------
 
 export const settings = definePluginSettings({
+    targetLang: {
+        type: OptionType.SELECT,
+        // getters (not plain strings!) so the UI language is read when the
+        // settings page renders — LocaleStore is only ready by then.
+        get displayName() { return tr2("翻译目标语言", "Translate to"); },
+        get description() {
+            return tr2(
+                "核心设置：要把消息翻译成什么语言。默认「跟随 Discord 界面语言」会随你客户端的界面语言自动切换；也可直接选一个固定语言。",
+                "Core setting: which language messages are translated into. The default \"Follow Discord UI language\" follows your client's UI language; you can also pick a fixed language."
+            );
+        },
+        options: TARGET_LANG_OPTIONS,
+    },
     apiKey: {
         type: OptionType.STRING,
         displayName: "API Key",
-        description: tr2(
-            "你的 AI 服务商 API Key。仅保存在你本机（Vencord 设置）中，不会上传到任何第三方服务器。",
-            "Your AI provider API key. Stored only in your local Vencord settings; never uploaded anywhere."
-        ),
+        get description() {
+            return tr2(
+                "你的 AI 服务商 API Key。仅保存在你本机（Vencord 设置）中，不会上传到任何第三方服务器。",
+                "Your AI provider API key. Stored only in your local Vencord settings; never uploaded anywhere."
+            );
+        },
         default: "",
         placeholder: "sk-...",
     },
     baseUrl: {
         type: OptionType.STRING,
         displayName: "API Base URL",
-        description: tr2(
-            "OpenAI 兼容接口地址。留空则使用 OpenAI 官方。例如：" +
-            "DeepSeek: https://api.deepseek.com/v1；" +
-            "通义千问: https://dashscope.aliyuncs.com/compatible-mode/v1；" +
-            "本地: http://localhost:11434/v1",
-            "OpenAI-compatible API base URL. Leave empty for OpenAI. E.g. " +
-            "DeepSeek: https://api.deepseek.com/v1, " +
-            "Qwen: https://dashscope.aliyuncs.com/compatible-mode/v1, " +
-            "local: http://localhost:11434/v1"
-        ),
+        get description() {
+            return tr2(
+                "OpenAI 兼容接口地址。留空则使用 OpenAI 官方。例如：" +
+                "DeepSeek: https://api.deepseek.com/v1；" +
+                "通义千问: https://dashscope.aliyuncs.com/compatible-mode/v1；" +
+                "本地: http://localhost:11434/v1",
+                "OpenAI-compatible API base URL. Leave empty for OpenAI. E.g. " +
+                "DeepSeek: https://api.deepseek.com/v1, " +
+                "Qwen: https://dashscope.aliyuncs.com/compatible-mode/v1, " +
+                "local: http://localhost:11434/v1"
+            );
+        },
         default: "",
         placeholder: "https://api.deepseek.com/v1",
     },
     model: {
         type: OptionType.STRING,
         displayName: "Model",
-        description: tr2(
-            "模型名称，例如 gpt-4o-mini / deepseek-chat / qwen-plus。",
-            "Model name, e.g. gpt-4o-mini / deepseek-chat / qwen-plus."
-        ),
+        get description() {
+            return tr2(
+                "模型名称，例如 gpt-4o-mini / deepseek-chat / qwen-plus。",
+                "Model name, e.g. gpt-4o-mini / deepseek-chat / qwen-plus."
+            );
+        },
         default: "gpt-4o-mini",
         placeholder: "gpt-4o-mini",
     },
-    followLocale: {
-        type: OptionType.BOOLEAN,
-        displayName: tr2("跟随 Discord 界面语言", "Follow Discord UI language"),
-        description: tr2(
-            "自动以你 Discord 客户端的界面语言作为翻译目标语言（例如界面为英文则译成英文）。关闭后在下方下拉菜单中选择目标语言。",
-            "Automatically use your Discord client's UI language as the translation target (e.g. English UI translates into English). Turn off to pick a target language from the dropdown below."
-        ),
-        default: true,
-    },
-    targetLang: {
-        type: OptionType.SELECT,
-        displayName: tr2("目标语言", "Target Language"),
-        description: tr2(
-            "翻译目标语言（仅当上面「跟随界面语言」关闭时生效）。",
-            "Translation target language (only used when \"Follow Discord UI language\" is off)."
-        ),
-        options: TARGET_LANG_OPTIONS,
-    },
     autoTranslate: {
         type: OptionType.BOOLEAN,
-        displayName: tr2("自动翻译消息", "Auto-translate messages"),
-        description: tr2(
-            "自动翻译屏幕上显示的外语消息（无需手动点击）。",
-            "Automatically translate foreign messages shown on screen (no clicking needed)."
-        ),
+        get displayName() { return tr2("自动翻译消息", "Auto-translate messages"); },
+        get description() {
+            return tr2(
+                "自动翻译屏幕上显示的外语消息（无需手动点击）。",
+                "Automatically translate foreign messages shown on screen (no clicking needed)."
+            );
+        },
         default: true,
     },
     translateHistory: {
         type: OptionType.BOOLEAN,
-        displayName: tr2("翻译历史消息", "Translate history"),
-        description: tr2(
-            "同时自动翻译屏幕上已经发送的历史消息（切频道、上翻聊天记录时自动识别）。关闭则只翻译新收到的消息。",
-            "Also auto-translate historical messages already on screen (open channel / scroll up). Off = only translate newly received messages."
-        ),
+        get displayName() { return tr2("翻译历史消息", "Translate history"); },
+        get description() {
+            return tr2(
+                "同时自动翻译屏幕上已经发送的历史消息（切频道、上翻聊天记录时自动识别）。关闭则只翻译新收到的消息。",
+                "Also auto-translate historical messages already on screen (open channel / scroll up). Off = only translate newly received messages."
+            );
+        },
         default: true,
     },
     autoDetect: {
         type: OptionType.BOOLEAN,
-        displayName: tr2("自动跳过目标语言", "Skip target language"),
-        description: tr2(
-            "自动跳过已经是目标语言的消息（仅当目标是中文时可用本地检测；其他语言交由 AI 判断）。关闭后始终请求 AI 翻译。",
-            "Skip messages already in the target language (local check only works for Chinese; other languages are left to the AI). Off = always request a translation."
-        ),
+        get displayName() { return tr2("自动跳过目标语言", "Skip target language"); },
+        get description() {
+            return tr2(
+                "自动跳过已经是目标语言的消息（仅当目标是中文时可用本地检测；其他语言交由 AI 判断）。关闭后始终请求 AI 翻译。",
+                "Skip messages already in the target language (local check only works for Chinese; other languages are left to the AI). Off = always request a translation."
+            );
+        },
         default: true,
     },
 }, {
     baseUrl: {
         isValid: v => typeof v === "string" && (v === "" || /^https?:\/\//i.test(v)),
-    },
-    // Only show the manual target-language dropdown when not following the UI language.
-    targetLang: {
-        hidden() { return this.store.followLocale; },
     },
 });
 
@@ -507,9 +525,17 @@ const translatedCache = new Map<string, string>();
 const CACHE_IDS_MAX = 300;
 
 const inFlight = new Set<string>();
-// Serial queue so a burst of messages (e.g. scrolling a long history) cannot
-// spam the API. Requests are processed with limited concurrency.
-const requestQueue: { id: string; content: string }[] = [];
+interface QueueItem {
+    id: string;
+    content: string;
+    /** Message time (ms epoch). Newest-first ordering key. */
+    time: number;
+    /** Manual translations always jump to the front of the queue. */
+    manual: boolean;
+}
+// Queue kept sorted newest-first, so the most recent message is translated
+// first and older ones follow (bulk history loads translate top-down).
+const requestQueue: QueueItem[] = [];
 const queuedIds = new Set<string>();
 let activeRequests = 0;
 const MAX_CONCURRENT = 3;
@@ -537,6 +563,24 @@ function getMessageContent(message: Message): string {
         || message.messageSnapshots?.[0]?.message?.content
         || message.embeds?.find(embed => embed.type === "auto_moderation_message")?.rawDescription
         || "";
+}
+
+/** Epoch ms of a message; falls back to 0 for missing timestamps. */
+function getMessageTime(message: Message): number {
+    const ts = message?.timestamp;
+    if (typeof ts === "string") {
+        const t = Date.parse(ts);
+        if (!Number.isNaN(t)) return t;
+    }
+    // Snowflake ids embed a timestamp — derive an approximate one.
+    const raw = String(message?.id ?? "");
+    if (/^\d{17,20}$/.test(raw)) {
+        try {
+            // Discord snowflake: (id >> 22) + DISCORD_EPOCH(1420070400000)
+            return Number(BigInt(raw) >> 22n) + 1420070400000;
+        } catch { /* fall through */ }
+    }
+    return 0;
 }
 
 function shouldSkipContent(content: string): boolean {
@@ -585,7 +629,7 @@ function TranslationAccessory({ message }: { message: Message }) {
             if (isNew || settings.store.translateHistory) {
                 const content = getMessageContent(message);
                 if (content && !shouldSkipContent(content)) {
-                    scheduleTranslate(id, content, false);
+                    scheduleTranslate(id, content, getMessageTime(message), false);
                 }
             }
         }
@@ -662,7 +706,29 @@ function pumpQueue() {
     }
 }
 
-function scheduleTranslate(id: string, content: string, isManual: boolean) {
+/**
+ * Insert into the queue keeping it sorted newest-first:
+ *  - manual translations always go first (user explicitly asked);
+ *  - everything else is ordered by message time, newest at the head.
+ * Discord message ids are monotonic, so newer ids = newer messages.
+ */
+function insertQueueItem(item: QueueItem) {
+    let index = 0;
+    if (item.manual) {
+        // Prepend: manual items skip the entire queue.
+        requestQueue.unshift(item);
+        return;
+    }
+    for (; index < requestQueue.length; index++) {
+        const existing = requestQueue[index];
+        // Skip manual items already sitting at the head (never behind them).
+        if (existing.manual) continue;
+        if (item.time > existing.time) break;
+    }
+    requestQueue.splice(index, 0, item);
+}
+
+function scheduleTranslate(id: string, content: string, time: number, isManual: boolean) {
     // Already translated / in-flight / queued -> skip.
     if (translatedCache.has(id) || inFlight.has(id) || queuedIds.has(id)) return;
     if (dismissed.has(id) && !isManual) return;
@@ -676,7 +742,7 @@ function scheduleTranslate(id: string, content: string, isManual: boolean) {
             autoRetries.set(id, retries + 1);
             setTimeout(() => {
                 autoRetries.delete(id);
-                scheduleTranslate(id, content, false);
+                scheduleTranslate(id, content, time, false);
             }, 2000 * (retries + 1));
         }
         return;
@@ -689,10 +755,10 @@ function scheduleTranslate(id: string, content: string, isManual: boolean) {
         if (translatedCache.has(id) || inFlight.has(id)) return;
         if (!isManual && requestQueue.length >= MAX_AUTO_QUEUE) {
             // Re-run the retry logic above.
-            scheduleTranslate(id, content, false);
+            scheduleTranslate(id, content, time, false);
             return;
         }
-        requestQueue.push({ id, content });
+        insertQueueItem({ id, content, time, manual: isManual });
         pumpQueue();
     }, QUEUE_DELAY_MS);
 }
@@ -705,7 +771,8 @@ function handleTranslate(message: Message) {
     dismissed.delete(message.id);
     translatedCache.delete(message.id);
     alreadyTarget.delete(message.id);
-    scheduleTranslate(message.id, content, true);
+    // Manual requests are marked manual=true so they jump the queue.
+    scheduleTranslate(message.id, content, getMessageTime(message), true);
 }
 
 /** Localised context-menu label, e.g. "翻译成简体中文" / "Translate to English". */
@@ -719,13 +786,16 @@ function translateMenuLabel(): string {
 
 export default definePlugin({
     name: "AiTranslate",
-    description: tr2(
-        "使用 AI（OpenAI 兼容接口，需自备 API Key）自动把消息翻译成你的 Discord 界面语言，" +
-        "翻译以浮层形式显示在原文下方，绝不改动原始消息。",
-        "Auto-translates messages into your Discord UI language using an OpenAI-compatible API " +
-        "(bring your own key). Translations appear as an overlay below the original message; " +
-        "original messages are never modified."
-    ),
+    // getter so the description follows the Discord UI language at render time
+    get description() {
+        return tr2(
+            "使用 AI（OpenAI 兼容接口，需自备 API Key）自动把消息翻译成你的 Discord 界面语言，" +
+            "翻译以浮层形式显示在原文下方，绝不改动原始消息。",
+            "Auto-translates messages into your Discord UI language using an OpenAI-compatible API " +
+            "(bring your own key). Translations appear as an overlay below the original message; " +
+            "original messages are never modified."
+        );
+    },
     authors: [{ name: "Albert Smith", id: 0n }],
     tags: ["Chat", "Translate", "AI", "Translation"],
 
@@ -781,7 +851,7 @@ export default definePlugin({
                 if (selfId && message.author?.id === selfId) return;
                 if (shouldSkipContent(content)) return;
 
-                scheduleTranslate(message.id, content, false);
+                scheduleTranslate(message.id, content, getMessageTime(message), false);
             }
         },
     },
