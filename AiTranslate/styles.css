@@ -2,6 +2,10 @@
  * AiTranslate styles
  */
 
+.vc-aitrans-icon {
+    display: block;
+}
+
 .vc-aitrans-accessory {
     display: flex;
     flex-wrap: wrap;
