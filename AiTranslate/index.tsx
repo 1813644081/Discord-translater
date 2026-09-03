@@ -144,16 +144,18 @@ function tr(key: keyof typeof uiStrings["zh"]): string {
 const AUTO_TARGET = "auto";
 
 /**
- * The language to translate INTO.
- * - "auto" (the dropdown default) resolves to the Discord UI language.
- * - any other value is the fixed language picked from the dropdown.
+ * Resolve the natural-language target for AI translation from a stored setting
+ * value. "auto" (or empty) resolves to the Discord UI language; anything else
+ * is a fixed language picked from the dropdown (legacy free-text tolerated).
+ *
+ * honorLegacyFollow: pre-dropdown versions stored a boolean `followLocale`.
+ * That flag only ever applied to the *incoming* target setting, so it is only
+ * honoured when resolving the main targetLang (not the outgoing one).
  */
-function resolveTargetLang(): string {
-    const raw = String(settings.store.targetLang ?? "").trim();
-
-    // Legacy: older versions stored a boolean followLocale. Honour it as "auto".
-    const legacyFollow = (settings.store as any).followLocale;
-    const isAuto = !raw || raw === AUTO_TARGET || legacyFollow === true;
+function resolveTargetFromStored(rawValue: unknown, honorLegacyFollow: boolean): string {
+    const raw = String(rawValue ?? "").trim();
+    const legacyFollow = honorLegacyFollow && (settings.store as any).followLocale === true;
+    const isAuto = !raw || raw === AUTO_TARGET || legacyFollow;
 
     if (isAuto) {
         const locale = getDiscordLocale();
@@ -167,6 +169,26 @@ function resolveTargetLang(): string {
     // it into one of the dropdown options. If it does not match, keep the raw
     // value — the model understands most language names ("Français", "法语"...).
     return normalizeTargetLang(raw) ?? raw;
+}
+
+/**
+ * The language incoming messages are translated INTO (the main dropdown).
+ */
+function resolveTargetLang(): string {
+    return resolveTargetFromStored(settings.store.targetLang, true);
+}
+
+/**
+ * The language the user's own outgoing messages are translated INTO.
+ * Independent of the incoming target; falls back to the incoming target when
+ * the outgoing setting was never configured (e.g. upgraded from an older
+ * version where they shared one setting).
+ */
+function resolveOutgoingTargetLang(): string {
+    const stored = (settings.store as any).outgoingTargetLang;
+    if (stored === undefined || stored === null || String(stored).trim() === "")
+        return resolveTargetLang();
+    return resolveTargetFromStored(stored, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +330,32 @@ export const settings = definePluginSettings({
         },
         default: true,
     },
+    translateOutgoing: {
+        type: OptionType.BOOLEAN,
+        get displayName() { return tr2("翻译我发送的消息", "Translate my messages"); },
+        get description() {
+            return tr2(
+                "发送前自动把输入框里的内容翻译成目标语言再发出（聊天记录里只显示译文）。" +
+                "翻译失败时会按原文发送，不会卡住消息。",
+                "Before sending, automatically translate what you typed into the target language, " +
+                "so only the translation appears in chat. If translation fails, the original text is sent instead."
+            );
+        },
+        default: false,
+    },
+    outgoingTargetLang: {
+        type: OptionType.SELECT,
+        get displayName() { return tr2("发送消息的目标语言", "Outgoing target language"); },
+        get description() {
+            return tr2(
+                "你发送的消息要被翻译成什么语言（独立于上方接收消息的目标语言）。" +
+                "默认「跟随 Discord 界面语言」；也可单独选一个固定语言。",
+                "Which language your sent messages are translated into — independent from the incoming " +
+                "translation target above. Default follows your Discord UI language; you can pick a fixed one instead."
+            );
+        },
+        options: TARGET_LANG_OPTIONS,
+    },
     translateHistory: {
         type: OptionType.BOOLEAN,
         get displayName() { return tr2("翻译历史消息", "Translate history"); },
@@ -333,6 +381,10 @@ export const settings = definePluginSettings({
 }, {
     baseUrl: {
         isValid: v => typeof v === "string" && (v === "" || /^https?:\/\//i.test(v)),
+    },
+    // Only show the outgoing target-language dropdown while the feature is on.
+    outgoingTargetLang: {
+        hidden() { return !this.store.translateOutgoing; },
     },
 });
 
@@ -384,7 +436,7 @@ function getNative(): NativeTranslate | undefined {
     }
 }
 
-async function translate(text: string): Promise<TranslationResult> {
+async function translate(text: string, targetLang?: string): Promise<TranslationResult> {
     const key = settings.store.apiKey?.trim();
     if (!key) {
         throw new Error(tr2(
@@ -395,7 +447,9 @@ async function translate(text: string): Promise<TranslationResult> {
 
     const base = settings.store.baseUrl?.trim() || "https://api.openai.com/v1";
     const model = settings.store.model?.trim() || "gpt-4o-mini";
-    const target = resolveTargetLang();
+    // Incoming translations use the main "targetLang"; outgoing messages can
+    // have their own independent language (outgoingTargetLang).
+    const target = targetLang ?? resolveTargetLang();
 
     const system =
         `You are a natural, fluent translator. Translate the user's message into ${target}. ` +
@@ -583,10 +637,10 @@ function getMessageTime(message: Message): number {
     return 0;
 }
 
-function shouldSkipContent(content: string): boolean {
+function shouldSkipContent(content: string, targetLang?: string): boolean {
     if (!content) return true;
     if (!settings.store.autoDetect) return false;
-    const target = resolveTargetLang();
+    const target = targetLang ?? resolveTargetLang();
     // Local heuristic only works reliably for Chinese targets (CJK detection).
     // For other target languages we leave detection to the AI model: the system
     // prompt tells it to echo the text back unchanged if it already is in the
@@ -827,6 +881,30 @@ export default definePlugin({
 
     // Render the translation overlay below every message.
     renderMessageAccessory: props => <TranslationAccessory message={props.message} />,
+
+    // Translate what the user is about to send (replaces content with the
+    // translation, mirroring Vencord's Translate plugin).
+    async onBeforeMessageSend(_, message) {
+        if (!settings.store.translateOutgoing) return;
+        const content = message.content?.trim();
+        if (!content) return;
+
+        // Outgoing translations have their own independent target language.
+        const outgoingTarget = resolveOutgoingTargetLang();
+
+        // Already in the outgoing target language? (e.g. Chinese target + Chinese input)
+        if (shouldSkipContent(content, outgoingTarget)) return;
+
+        try {
+            const { text } = await translate(content, outgoingTarget);
+            if (text && text !== content) {
+                message.content = text;
+            }
+        } catch (e) {
+            // Never block the user's message: send the original on failure.
+            console.error("[AiTranslate] outgoing translation failed, sending original:", e);
+        }
+    },
 
     // Mark messages that just arrived (vs. history loaded from the store) so
     // the accessory's mount effect can honour the "translateHistory" setting.

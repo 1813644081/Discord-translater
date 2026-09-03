@@ -16,6 +16,7 @@ A Vencord user plugin that uses an **OpenAI-compatible API** to translate foreig
 - **🧠 AI-powered, provider-agnostic** — speaks the OpenAI-compatible protocol: DeepSeek / Qwen (Tongyi) / Zhipu / OpenAI / local Ollama and more. You bring your own API key;
 - **🚫 Never touches the original** — translations are a separate overlay under the message; source content stays byte-for-byte intact;
 - **🖱️ Manual translate from the context menu** — right-click any message to translate (with an icon, matching Discord's menu style);
+- **📤 Translate my messages before sending** — when enabled, what you type is translated into the target language before it is sent (only the translation appears in chat); the target language is controlled by the same "Translate to" dropdown;
 - **⚡ Cost-conscious** — identical texts are cached and requests are rate-limited/queued, so you are never double-billed or rate-limited into oblivion.
 
 ## Installation
@@ -94,6 +95,8 @@ Open the plugin settings and configure:
 | **API Base URL** | OpenAI-compatible endpoint; empty = OpenAI | `https://api.deepseek.com/v1` |
 | **Model** | Model name | `deepseek-chat` / `gpt-4o-mini` / `qwen-plus` |
 | **Auto-translate messages** | Auto-translate foreign messages shown on screen | `On` |
+| **Translate my messages** | Translate what you type before sending (only the translation appears in chat); falls back to the original on failure | `Off` |
+| **Outgoing target language** | Shown when the toggle above is on — target language for *your sent messages*, independent from the incoming one above | `Follow UI (default)` |
 | **Translate history** | Also translate old messages already on screen (scroll up / channel switch) | `On` |
 | **Skip target language** | Don't translate messages already in the target language (local check for Chinese; AI decides the rest) | `On` |
 
@@ -137,6 +140,7 @@ Open the plugin settings and configure:
 - **🧠 AI 驱动，兼容多家**：走 OpenAI 兼容接口，支持 DeepSeek / 通义千问 / 智谱 / OpenAI / 本地 Ollama 等，API Key 由你自己提供；
 - **🚫 不碰原文**：翻译以独立浮层显示在原文下方，原始消息内容零改动；
 - **🖱️ 右键手动翻译**：右键任意消息即可翻译（带图标，与 Discord 菜单风格一致）；
+- **📤 翻译我发送的消息**：开启后，发送前自动把输入框内容翻译成目标语言再发出（聊天记录里只显示译文），目标语言同样由「翻译目标语言」下拉控制；
 - **⚡ 省额度设计**：相同文本自动缓存、翻译请求限流排队，不会重复计费或打爆接口。
 
 ## 安装方法
@@ -215,6 +219,8 @@ Open the plugin settings and configure:
 | **API Base URL** | OpenAI 兼容接口地址，留空默认 OpenAI | `https://api.deepseek.com/v1` |
 | **Model** | 模型名 | `deepseek-chat` / `gpt-4o-mini` / `qwen-plus` |
 | **自动翻译消息** | 自动翻译屏幕上显示的外语消息 | `开` |
+| **翻译我发送的消息** | 发送前自动把输入框内容翻译成目标语言再发出（聊天记录只显示译文）；失败则按原文发送 | `关` |
+| **发送消息的目标语言** | 开启上方开关后出现——**你发送的消息**要翻译成的语言，与上面接收消息的「翻译目标语言」相互独立 | `跟随界面（默认）` |
 | **翻译历史消息** | 同时翻译屏幕上已发送的旧消息（上翻/切频道时） | `开` |
 | **自动跳过目标语言** | 已是目标语言的消息不翻译（中文目标用本地检测，其余交 AI） | `开` |
 
